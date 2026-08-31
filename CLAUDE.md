@@ -33,21 +33,46 @@
 - `python tools/mutation_check.py` を通す。正しい実装を壊してテストが落ちなければ、その経路はノーガード
 - 比較の前に、比較対象が空でないことを assert する(`assert normal.trade_log`)
 
-## assert の書き方
+## 歯止めの書き方
 
-**絞り込みに使った述語を、そのまま assert に書かない。** 構造上必ず真になり、
+**絞り込みに使った述語を、そのまま検査に書かない。** 構造上必ず真になり、
 歯止めのように見えて何も見張らない。検査するのは「どう絞ったか」ではなく
 「**結果に何が入ったか**」(`calibration.assert_no_unmatured` の形)。
 
 先読みの検査は、テストではなく**本体**に置く。先読みは静かに数字を良くする種類の
 欠陥なので、静かに通してはいけない。
 
+**本体(`src/`)に素の `assert` を書かない。** `python -O` / `PYTHONOPTIMIZE=1` で
+消える。`src/lookahead_demo/errors.py` の `LookaheadError` / `AccountingError` を
+`raise` する。`tests/test_guards.py::test_src_has_no_bare_assert` が横断で検査している。
+
+**歯止めを1件直したら、同じ形が他に無いか横断で洗う。** 1件直して満足したところを
+実際に指摘された。可能なら、個別の箇所ではなく**形で止める検査**(AST など)に置き換える。
+
+**「対照実装に○○が無いこと」だけを見るテストを書かない。** 対照実装がその事象を
+構造上起こさないなら、常に真になる。まず**正しい側にそれが実在すること**を
+確かめてから、対照側に無いことを言う。
+
 ## データを読む責務を分離する
 
 - `src/` のコードはファイルも API も読まない。渡された DataFrame だけを見る
 - データを作るのは `tests/conftest.py` だけ
-- `read_csv` / `read_parquet` / `requests` / `open(` / `Path(` を `src/` に書かない。
-  `tests/test_no_data_io.py` が静的に検査している
+- `src/` にデータ I/O を書かない。`read_*` 呼び出し、`open` / `eval` / `exec`、
+  書き出し系(`to_csv` など)、`requests` / `urllib` / `sqlite3` / `pickle` / `os` /
+  `pathlib` / `subprocess` などの import が対象。
+  `tests/test_no_data_io.py` が **AST を歩いて**静的に検査している
+- 禁止するものを**トークンの列挙で足さない**。列挙は必ず遅れる(pandas の読み込みは
+  20種類ある)。捕まえるのは名前ではなく**形**で、`read_` 接頭辞のように書く
+
+## 勘定を壊さない
+
+- 建て直しでは、**既存の建玉も目標ウェイトに揃える**。新規ぶんだけを純資産から
+  建てると資本を二重に数え、現金が負に落ちて暗黙のレバレッジが立つ
+- 重みの合計は 1 なので、**建て直しのあと現金は 0 になる**。これを不変条件として
+  検査する(`tests/test_guards.py::test_capital_is_not_double_counted`)
+- 埋められない値は**埋めずに落とし、落ちた件数を返り値に出す**
+  (`universe.restrict_with_count` / `backtest.BacktestResult` の各カウンタの形)。
+  母集団に鮮度の上限を掛けるなら、価格にも掛ける。片方だけだと素通りする
 
 ## シグネチャ
 

@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import pandas as pd
 
+from lookahead_demo.backtest import run_backtest
 from lookahead_demo.naive import naive_run_backtest
 
-from conftest import CUTOFF, build_data, tamper_future_disclosures
+from conftest import CUTOFF, DELISTED_CODE, build_data, tamper_future_disclosures
 
 
 def _differs(a, b) -> bool:
@@ -58,12 +59,38 @@ def test_future_disclosure_changes_the_naive_pipeline():
 
 
 def test_naive_universe_hides_the_delisted_code_from_the_past():
-    """生存者バイアスは取引履歴に現れる。対照実装には打ち切りが1件も無い。"""
+    """生存者バイアスは取引履歴に現れる。正しい実装との**差**で見る。
+
+    「naive に delisted が1件も無いこと」だけを見る書き方は空振りする。
+    naive_run_backtest は "delisted" という理由を**構造上1件も出さない**ので、
+    母集団の作り方が正しかろうと間違っていようと必ず真になる。実測で
+    naive の reason 集合は {'rebalance'} のみだった。
+
+    見るべきは正しい実装との差で、順序も大事になる。**まず正しい側に打ち切りが
+    実在することを確かめてから**、対照側にそれが無いことを言う。前半が無いと、
+    データの都合で打ち切りが起きなくなった日に検査ごと空振りする。
+    """
     dates, price_df, kwargs = build_data()
 
+    correct = run_backtest(trading_dates=dates, price_df=price_df, **kwargs)
     naive = naive_run_backtest(dates, price_df, **kwargs)
 
-    assert not [row for row in naive.trade_log if row[5] == "delisted"]
+    # 空振り防止(その1)。正しい側に打ち切りが実在すること。
+    delisted = [row for row in correct.trade_log if row[5] == "delisted"]
+    assert delisted, (
+        "正しい実装に打ち切りが1件も無い。データ側の問題で、この検査は空振りしている"
+    )
+    assert {row[2] for row in delisted} == {DELISTED_CODE}
+
+    # 空振り防止(その2)。対照側でも取引自体は起きていること。
+    assert naive.trade_log, "対照実装で取引が起きていない。データ側の問題"
+
+    # 本題。対照実装は最新スナップショット1枚を全期間に当てるので、途中で
+    # 消えた銘柄は過去の母集団からも消える。打ち切りという事象自体が起きない。
+    # naive_build_universe を直すとここが落ちる = 検出力がある。
+    assert DELISTED_CODE not in {row[2] for row in naive.trade_log}, (
+        "対照実装が、消えた銘柄を過去に扱っている。経路Cの再現になっていない"
+    )
 
 
 def test_the_fixture_actually_moves_prices_after_the_cutoff():

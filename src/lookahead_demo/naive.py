@@ -140,20 +140,38 @@ def naive_run_backtest(
 
         if targets:
             equity = portfolio_value(cash, holdings, prices)
-            # 正しい実装との違いは、ここに渡す vol が全期間か d 時点までか、だけ
-            weights = inverse_vol_weights(full_period_vol, targets)
+            # 正しい実装との違いは、ここに渡す vol が全期間か d 時点までか、だけ。
+            # **建て方(既存建玉も目標ウェイトに揃える)は本体と揃えてある。**
+            # ここを本体と変えると、比較で出た差が先読みのせいなのか建て方の
+            # せいなのか分からなくなり、対照実装として使えなくなる。
+            weights, _ = inverse_vol_weights(full_period_vol, targets)
             for code in targets:
-                if code in holdings:
+                px = float(prices[code])
+                target_shares = equity * weights[code] / px
+                delta = target_shares - holdings.get(code, 0.0)
+                holdings[code] = target_shares
+                if delta == 0.0:
                     continue
-                budget = equity * weights[code]
-                shares = budget / float(prices[code])
-                cash -= shares * float(prices[code])
-                holdings[code] = shares
+                cash -= delta * px
                 trade_log.append(
-                    (day, "BUY", code, shares, float(prices[code]), "rebalance")
+                    (
+                        day,
+                        "BUY" if delta > 0 else "SELL",
+                        code,
+                        abs(delta),
+                        px,
+                        "rebalance",
+                    )
                 )
 
-        equity_rows.append({"date": d, "equity": portfolio_value(cash, holdings, prices)})
+        equity_rows.append(
+            {
+                "date": d,
+                "equity": portfolio_value(cash, holdings, prices),
+                "cash": cash,
+                "n_holdings": len(holdings),
+            }
+        )
 
     return BacktestResult(
         trade_log=trade_log, equity_curve=pd.DataFrame(equity_rows)

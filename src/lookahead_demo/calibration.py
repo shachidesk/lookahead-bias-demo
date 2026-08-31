@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from .errors import LookaheadError
+
 
 def summarize(records: pd.DataFrame) -> dict[str, float]:
     """渡されたレコードだけを要約する。読み込みは一切しない。"""
@@ -29,17 +31,21 @@ def assert_no_unmatured(
     """先読み即死。**選ばれた行そのもの**に未満了が混ざっていないか見る。
 
     ここが要点で、絞り込みに使った述語をもう一度書いてはいけない。同じ式を
-    二度書いた assert は構造上必ず真になり、歯止めのように見えて何も見張って
+    二度書いた検査は構造上必ず真になり、歯止めのように見えて何も見張って
     いない。検査すべきは「どう絞ったか」ではなく「結果に何が入ったか」で、
     そうしておくと後から選択ロジックを差し替えたときにこの検査が生き残る。
+
+    **素の assert では書かない。** `python -O` / `PYTHONOPTIMIZE=1` で消え、
+    その設定でだけ静かに素通りするため(errors.py)。
     """
     if used.empty:
         return
     latest = used["date"].max() + pd.DateOffset(months=max_horizon_months)
-    assert latest <= d, (
-        f"calibration に未満了(将来)の日が混入している: "
-        f"満了 {latest.date()} > 判断日 {d.date()}"
-    )
+    if latest > d:
+        raise LookaheadError(
+            f"calibration に未満了(将来)の日が混入している: "
+            f"満了 {latest.date()} > 判断日 {d.date()}"
+        )
 
 
 def calibration_for(
@@ -57,6 +63,7 @@ def calibration_for(
     used = records[records["date"].isin(eligible)]
 
     # テストではなく本体に置く。先読みは静かに数字を良くするので、静かに通さない。
+    # -O でも消えないよう raise で書いてある(assert_no_unmatured 参照)。
     assert_no_unmatured(used, d, max_horizon_months)
 
     return summarize(used)

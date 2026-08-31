@@ -8,3 +8,54 @@ build/
 dist/
 .coverage
 .DS_Store
+
+# --- 機密・認証情報の置き忘れを止める ---
+# 現時点で混入は0件だが、公開予定のリポジトリに「置いたら止まる」柵が無い
+# 状態を残さない。親リポジトリで増補した内容が、ここへ引き継がれていなかった。
+#
+# 🔴 **前後をアンカーしないグロブを書かない。** `*secret*` と書くと
+# `docs/secret-handling.md` や `src/lookahead_demo/secrets_note.py` まで一致し、
+# `git add` が**エラーも出さずに何もしない**。無視されたことに気づく経路が無く、
+# 機密を止めるつもりの行が、普通のソースを黙って消す。実測で確認済み。
+.env
+.env.*
+!.env.example
+.envrc
+.netrc
+.npmrc
+.pypirc
+.secrets/
+secrets.json
+secrets.yaml
+secrets.yml
+credentials.json
+credentials.yaml
+credentials.yml
+service-account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# --- ログ・バックアップ ---
+*.log
+*.bak
+*.orig
+*.tmp
+
+# --- 生データ(data/ の下に限定する) ---
+# 🔴 拡張子だけで全体に掛けない。`*.csv` は将来のテストフィクスチャを黙って
+# 飲み込む。**そもそもデータファイルは ignore するより「追跡外」として見える
+# ほうがよい** —— 検査(S-0)の「追跡外・未 ignore」に出てくれば気づけるが、
+# ignore してしまうと一覧から消える。ignore が要るのは機密のほうだけ。
+data/
+
+# --- ローカル環境設定 ---
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.mypy_cache/
+.ruff_cache/

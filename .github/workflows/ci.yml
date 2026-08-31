@@ -35,5 +35,9 @@ jobs:
         run: python tools/mutation_check.py
 
       # 変異は必ず元に戻す設計だが、戻し損ねを CI 側でも見張る。
+      # if: always() が要る。GitHub Actions は前のステップが失敗すると後続を
+      # スキップするので、これが無いと mutation_check.py が落ちたとき ——
+      # つまり変異が残っている可能性が最も高いとき —— に限って見張りが働かない。
       - name: 変異が残っていないこと
+        if: always()
         run: git diff --exit-code

@@ -11,6 +11,11 @@ import pandas as pd
 # 決算データが「読めるようになった日」を表す列。期末日ではなくこちらを使う。
 DISCLOSURE_DATE_COL = "DiscDate"
 
+# 終値の許容鮮度(日)。母集団側(build_pit_universe)が古すぎる日を落として
+# いるのに価格側に上限が無いと、「母集団が明示的に拒んでいる黙って埋める」を
+# 価格側でやることになる。既定を universe.MAX_STALENESS_DAYS と同じ 45 に揃える。
+MAX_PRICE_STALENESS_DAYS = 45
+
 
 def score_growth(
     statements_df: pd.DataFrame,
@@ -57,14 +62,40 @@ def latest_close_as_of(
     price_df: pd.DataFrame,
     as_of_date: pd.Timestamp,  # デフォルト値を与えない(経路A)
     codes: list[str],
+    *,  # 以降はキーワード専用
+    max_staleness_days: int | None = MAX_PRICE_STALENESS_DAYS,
 ) -> pd.Series:
-    """as_of_date までの最新終値を返す。as_of_date より後の行は一切見ない。"""
+    """as_of_date までの最新終値を返す。as_of_date より後の行は一切見ない。
+
+    **鮮度の上限を持つ。** 上限を超えた銘柄は戻り値から落とす(0 や直近値で
+    埋めない)。何か月前の終値でも「その日の価格」として返してしまうと、
+    その銘柄はスコアリング・約定・評価にそのまま使われ、しかも
+    restrict_with_count からは 0件落ちと報告される。
+
+    max_staleness_days に None を渡すと上限を掛けない。**打ち切りや評価など、
+    「最後に分かっている値」を使うことが正しい場面のために明示で開けてある。**
+    既定を安全側に置き、緩めるほうを呼び出し側に書かせる。
+
+    Args:
+        price_df: date / Code / close を持つ価格データ。全期間ぶんでよい。
+        as_of_date: 判断を行う日。この日までの行だけが使われる。
+        codes: 対象の銘柄コード。
+        max_staleness_days: 終値の許容鮮度(日)。None で無制限。
+
+    Returns:
+        index が銘柄コード、値が終値の Series。古すぎる銘柄は index に現れない。
+    """
     df = price_df[
         (price_df["date"] <= as_of_date) & (price_df["Code"].isin(codes))
     ]
     if df.empty:
         return pd.Series(dtype="float64")
     latest = df.sort_values("date").groupby("Code").tail(1)
+    if max_staleness_days is not None:
+        staleness = (as_of_date - latest["date"]).dt.days
+        latest = latest[staleness <= max_staleness_days]
+        if latest.empty:
+            return pd.Series(dtype="float64")
     return latest.set_index("Code")["close"]
 
 

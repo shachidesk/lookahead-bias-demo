@@ -70,17 +70,31 @@ python -m venv .venv
 ```
 
 ```
-検出 OK  | 経路A: 開示日フィルタを外す
-検出 OK  | 経路D: ボラティリティを全期間から計算する
-検出 OK  | 経路C: 未来のスナップショットも母集団に使う
-検出 OK  | 鮮度チェックを外す(古い母集団を黙って使う)
-検出 OK  | 経路D: 満了していない期間も混ぜる
-検出 OK  | 時系列の昇順チェックを外す
+検出 OK     | 経路A: 開示日フィルタを外す -> tests/test_scoring.py が落ちた
+検出 OK     | 経路D: ボラティリティを全期間から計算する -> tests/test_backtest_lookahead.py が落ちた
+検出 OK     | 経路C: 未来のスナップショットも母集団に使う -> tests/test_universe.py が落ちた
+検出 OK     | 鮮度チェックを外す(古い母集団を黙って使う) -> tests/test_universe.py が落ちた
+検出 OK     | 経路D: 満了していない期間も混ぜる -> tests/test_calibration.py が落ちた
+検出 OK     | 時系列の昇順チェックを外す -> tests/test_backtest_lookahead.py が落ちた
+検出 OK     | 指摘1: 既存建玉を再調整せず、資本を二重計上する -> tests/test_guards.py が落ちた
+検出 OK     | 指摘2: 定義できない銘柄にだけ生の 1.0 を混ぜる -> tests/test_guards.py が落ちた
+検出 OK     | 指摘3: 歯止めを素の assert に戻す(-O で消える) -> tests/test_guards.py が落ちた
+検出 OK     | 指摘9: 価格の鮮度上限を外す(古い終値を黙って使う) -> tests/test_guards.py が落ちた
+検出 OK     | 指摘4の対偶: 消えた銘柄を打ち切らず黙って落とす -> tests/test_backtest_lookahead.py が落ちた
+検出 OK     | 再検査1: 現金の歯止めを片側(負)だけに戻す -> tests/test_guards.py が落ちた
+検出 OK     | 再検査2: max_staleness_days を価格側に渡さない -> tests/test_guards.py が落ちた
+検出 OK     | 再検査3: 接頭辞に従わない読み込みの列挙を空にする -> tests/test_no_data_io.py が落ちた
 
-変異 6 件中 検出 6 件
+変異 14 件中 検出 14 件
 ```
 
 1件でも素通りしたら、その経路は実質ノーガードになっている。CI で毎回回している。
+
+**「落ちた」の判定は粗くしない。** `returncode != 0` を検出と数えると、pytest が
+収集エラー(2)や使用法エラー(4)で終わっただけの変異が「検出 OK」になる。構文を
+壊しただけの変異が、先読みテストを1件も落とさずに緑になってしまう。見るのは
+「終了コードが**テスト失敗(1)**であること」と「**狙ったテストファイルが実際に
+落ちたこと**」の両方。
 
 ### 3. 空振りしないことを、テスト自身に書く
 
@@ -113,6 +127,30 @@ assert normal.trade_log, "判断日以前に取引が発生していない。テ
   読む経路が無ければ、そこから先読みは入りようがない。
   [`test_no_data_io.py`](tests/test_no_data_io.py) が静的に検査している
 
+- **禁止トークンを列挙する検査は、必ず遅れる。**
+  `read_parquet` / `read_csv` / `read_json` / `read_sql` を並べても、pandas の
+  読み込み関数は20種類ある。実測で `read_excel` `read_pickle` `read_hdf` ほか計14種が
+  素通りしていた。列挙ではなく **AST を歩いて「形」で捕まえる**。`read_` で始まる
+  呼び出しは名前を知らなくても捕まるし、AST は docstring やコメントを見ないので
+  「`read_csv` と書いてある説明文」を誤検出することもない
+
+- **本体に置く歯止めを、素の `assert` で書かない。**
+  `python -O` / `PYTHONOPTIMIZE=1` で**消える**。テストも変異チェックも `-O` では
+  回さないので、消えたことに気づく経路が無い。[`errors.py`](src/lookahead_demo/errors.py)
+  の例外を `raise` する。同じ欠陥がまた入らないよう、`src/` に素の `assert` が
+  1件も無いことを AST で横断的に検査している(`test_src_has_no_bare_assert`)
+
+- **「対照実装に○○が無いこと」だけを見るテストは空振りする。**
+  対照実装がその事象を**構造上起こさない**なら、母集団の作り方が正しかろうと
+  間違っていようと必ず真になる。まず**正しい側にそれが実在すること**を確かめてから、
+  対照側に無いことを言う。これは実測でしか分からない(reason 文字列の集合を出して判明した)
+
+- **先読み以外の経路でも数字は壊れる。**
+  既存の建玉を目標ウェイトに再調整せず、新規ぶんだけを純資産から建てると、
+  資本を二重に数えることになる。現金が負に落ちて、借入の記録も無いまま暗黙の
+  レバレッジが立つ。重みの合計は 1 なので、**建て直しのあと現金は 0 になる**はず ——
+  これを不変条件として検査する(`test_capital_is_not_double_counted`)
+
 ## 構成
 
 ```
@@ -122,6 +160,7 @@ src/lookahead_demo/
   calibration.py   経路D。満了済みの過去だけから作る + 本体に置く歯止め
   backtest.py      上記を組んだ検証パイプライン
   naive.py         わざと先読みを入れた対照実装
+  errors.py        本体に置く歯止め用の例外(-O で消えないように)
 tests/
   conftest.py                  ダミーデータ。ここだけがデータを作る
   test_scoring.py              経路A・B
@@ -129,7 +168,8 @@ tests/
   test_calibration.py          経路D
   test_backtest_lookahead.py   パイプライン全体
   test_detects_naive.py        テストの検出力そのもの
-  test_no_data_io.py           ロジック側にI/Oが無いことの静的検査
+  test_no_data_io.py           ロジック側にI/Oが無いことの静的検査(AST)
+  test_guards.py               歯止めが作動することと、同じ欠陥が再発しないこと
 tools/
   mutation_check.py            正しい実装を壊してテストが落ちるか確かめる
 CLAUDE.md                      AI に守らせるためのハードルール
