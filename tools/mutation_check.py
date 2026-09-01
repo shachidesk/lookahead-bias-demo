@@ -24,6 +24,13 @@ import pathlib
 import subprocess
 import sys
 
+try:  # 非日本語コードページのコンソールでも、進捗を出す前に落ちないようにする。
+    # 環境変数(PYTHONIOENCODING)に依存させると、付け忘れたときに検査結果ではなく
+    # トレースバックが出て、「道具が動かないから飛ばす」を招く。
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # pragma: no cover
+    pass
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # pytest の終了コード。0/1 以外は「テストが失敗した」ではない。
@@ -167,6 +174,27 @@ MUTANTS: list[tuple[str, str, str, str, str]] = [
         '',
         '再検査3: 接頭辞に従わない読み込みの列挙を空にする',
         'tests/test_no_data_io.py',
+    ),
+    (
+        "src/lookahead_demo/backtest.py",
+        "    report = guards.require_pass()\n",
+        "    report = guards.line()  # 合否を出すだけで止めない\n",
+        "実行ログ: 合否は出すが PASS 以外でも止めない",
+        "tests/test_guard_log.py",
+    ),
+    (
+        "src/lookahead_demo/guardlog.py",
+        "        return VACUOUS if self.never_checked() else PASS\n",
+        "        return PASS\n",
+        "実行ログ: 空振り(評価回数0)でも PASS にする",
+        "tests/test_guard_log.py",
+    ),
+    (
+        "src/lookahead_demo/backtest.py",
+        '            guards.checked("cash_deployed")\n',
+        "",
+        "実行ログ: 現金の歯止めを数えない(宣言だけ残って空振りする)",
+        "tests/test_guard_log.py",
     ),
 ]
 

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from .errors import AccountingError, LookaheadError
+from .guardlog import GuardLog
 from .scoring import (
     MAX_PRICE_STALENESS_DAYS,
     latest_close_as_of,
@@ -38,6 +39,9 @@ class BacktestResult:
     # ボラティリティを定義できず等ウェイトに倒した日数。restrict_with_count と
     # 同じ理由で、倒した事実を呼び出し側から数えられるようにしておく。
     equal_weight_days: int = 0
+    # この実行で歯止めの合否がどう出たか(guardlog.GuardLog.line())。
+    # 数字と同じ器に入れておくと、結果を見た人が合否も必ず目にする。
+    guard_report: str = ""
 
 
 def portfolio_value(
@@ -135,8 +139,13 @@ def run_backtest(
             動いており、**31日前の終値がその日の約定値として使われていた**。
             引数が届いていないことは、結果が同じになるので気づけない。
     """
+    # この実行で評価されるべき歯止めを先に宣言する。1つでも評価回数が 0 なら
+    # 判定は PASS ではなく VACUOUS になり、数字を返す前に止まる(guardlog.py)。
+    guards = GuardLog(expected=("ascending_dates", "cash_deployed"))
+
     # 並び替えのつもりが順序を壊していた、という事故を止める。
     # assert ではなく raise。-O で消える歯止めは歯止めではない(errors.py)。
+    guards.checked("ascending_dates")
     if trading_dates != sorted(trading_dates):
         raise LookaheadError("trading_dates が昇順でない")
 
@@ -254,6 +263,7 @@ def run_backtest(
                     )
                 )
 
+            guards.checked("cash_deployed")
             assert_cash_is_fully_deployed(cash, equity, day)
 
         # cash と n_holdings も残す。建て直しのあと現金がいくら残ったかが
@@ -267,10 +277,14 @@ def run_backtest(
             }
         )
 
+    # 🔴 数字を組み立てる前に合否を出す。良い数字を見てから検証すると甘くなる。
+    report = guards.require_pass()
+
     return BacktestResult(
         trade_log=trade_log,
         equity_curve=pd.DataFrame(equity_rows),
         dropped_by_restriction=dropped_total,
         undefined_universe_days=undefined_days,
         equal_weight_days=equal_weight_days,
+        guard_report=report,
     )
