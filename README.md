@@ -22,7 +22,7 @@ python -m venv .venv
 ```
 
 ```
-37 passed
+90 passed
 ```
 
 ## 4つの混入経路
